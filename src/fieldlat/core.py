@@ -8,7 +8,8 @@ def generate_adaptive_lattice(
     resolution: int = 50,
     base_scale: float = 10.0,
     dense_scale: float = 25.0,
-    threshold: float = 0.3
+    threshold: float = 0.3,
+    pad_width: int = 2
 ) -> pv.PolyData:
     """
     Generates an adaptive Gyroid lattice with variable cell size via lattice blending.
@@ -20,6 +21,8 @@ def generate_adaptive_lattice(
         base_scale (float): The frequency for low-stress areas (larger cells).
         dense_scale (float): The frequency for high-stress areas (smaller cells).
         threshold (float): Constant wall thickness threshold.
+        pad_width (int): Number of voxel layers to force to void at the boundaries.
+                         This ensures the mesh is watertight (capped). Default is 2.
 
     Returns:
         pv.PolyData: The extracted isosurface mesh of the lattice.
@@ -62,8 +65,6 @@ def generate_adaptive_lattice(
     
     def get_gyroid(scale, X, Y, Z):
         # We scale the coordinates by the frequency
-        # Note: If coordinates are in a large range, we might need to normalize them 
-        # or adjust scales accordingly. Assuming scales are tuned for world coordinates.
         sx, sy, sz = scale * X, scale * Y, scale * Z
         return np.sin(sx) * np.cos(sy) + np.sin(sy) * np.cos(sz) + np.sin(sz) * np.cos(sx)
 
@@ -75,9 +76,23 @@ def generate_adaptive_lattice(
 
     # 5. Apply Wall Thickness Threshold
     # Isosurface: |result| - threshold = 0
+    # Values < 0 are inside the wall (solid), Values > 0 are air (void)
     scalar_field = np.abs(result) - threshold
 
-    # 6. Extract Surface using Marching Cubes
+    # 6. Apply Padding to force watertight mesh
+    # We force the boundary voxels to a positive value (Void) to close the mesh.
+    if pad_width > 0:
+        # Create a boolean mask of the same shape, initially all False (keep values)
+        # Or simpler, just set the slices.
+        # We set to 1.0 which is > 0 (Void).
+        scalar_field[:pad_width, :, :] = 1.0
+        scalar_field[-pad_width:, :, :] = 1.0
+        scalar_field[:, :pad_width, :] = 1.0
+        scalar_field[:, -pad_width:, :] = 1.0
+        scalar_field[:, :, :pad_width] = 1.0
+        scalar_field[:, :, -pad_width:] = 1.0
+
+    # 7. Extract Surface using Marching Cubes
     verts, faces, normals, values = marching_cubes(
         scalar_field, 
         level=0.0, 
@@ -87,7 +102,7 @@ def generate_adaptive_lattice(
     # Offset vertices by the origin
     verts += np.array([bounds[0], bounds[2], bounds[4]])
 
-    # 7. Convert to PyVista Mesh
+    # 8. Convert to PyVista Mesh
     n_faces = faces.shape[0]
     padding = np.full((n_faces, 1), 3)
     pv_faces = np.hstack((padding, faces)).flatten()
