@@ -42,7 +42,7 @@ def main():
         lattice = generate_adaptive_lattice(
             mesh, 
             field_name=field_name,
-            lattice_type='gyroid', # Options: 'gyroid', 'diamond', 'primitive', 'lidinoid'
+            lattice_type='lidinoid', # Options: 'gyroid', 'diamond', 'primitive', 'lidinoid'
             resolution=60,         # Voxel grid resolution
             base_scale=10.0,       # Frequency for low-stress areas (larger cells)
             dense_scale=25.0,      # Frequency for high-stress areas (smaller cells)
@@ -54,7 +54,7 @@ def main():
         print("Visualizing result...")
         pl = pv.Plotter()
         pl.add_mesh(mesh, style='wireframe', color='black', opacity=0.1, label='Input Domain')
-        pl.add_mesh(lattice, color='white', smooth_shading=True, label='Gyroid Lattice')
+        pl.add_mesh(lattice, color='white', smooth_shading=True, label='Gyroid Lattice (Sheet)')
         pl.add_legend()
         pl.show()
         
@@ -62,6 +62,26 @@ def main():
         output_file = 'output_lattice.stl'
         lattice.save(output_file)
         print(f"Saved lattice to {output_file}")
+
+        # 5. Generate Strut Lattice (Example)
+        print("\nGenerating Strut-based lattice...")
+        lattice_strut = generate_adaptive_lattice(
+            mesh,
+            field_name=field_name,
+            lattice_type='gyroid',
+            structure_mode='strut',  # New mode
+            resolution=60,
+            base_scale=8.0,
+            dense_scale=15.0,
+            threshold=0.0          # 0.0 implies 50/50 volume split for TPMS
+        )
+        print("Strut lattice generation complete.")
+        
+        pl2 = pv.Plotter()
+        pl2.add_mesh(mesh, style='wireframe', color='black', opacity=0.1, label='Input Domain')
+        pl2.add_mesh(lattice_strut, color='orange', smooth_shading=True, label='Gyroid Lattice (Strut)')
+        pl2.add_legend()
+        pl2.show()
 
     except Exception as e:
         print(f"Error generating lattice: {e}")

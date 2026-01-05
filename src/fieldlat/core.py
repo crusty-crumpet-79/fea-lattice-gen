@@ -55,6 +55,7 @@ def generate_adaptive_lattice(
     mesh: pv.DataSet,
     field_name: str,
     lattice_type: str = 'gyroid',
+    structure_mode: str = 'sheet',
     resolution: int = 50,
     base_scale: float = 10.0,
     dense_scale: float = 25.0,
@@ -68,10 +69,14 @@ def generate_adaptive_lattice(
         mesh (pv.DataSet): The source mesh containing the scalar field.
         field_name (str): The name of the scalar field in point_data.
         lattice_type (str): Topology type ('gyroid', 'diamond', 'primitive', 'lidinoid').
+        structure_mode (str): 'sheet' (Shell) or 'strut' (Skeletal). 
+                              Defaults to 'sheet'.
         resolution (int): Resolution of the voxel grid (cubed).
         base_scale (float): The frequency for low-stress areas (larger cells).
         dense_scale (float): The frequency for high-stress areas (smaller cells).
-        threshold (float): Constant wall thickness threshold.
+        threshold (float): Controls density/thickness.
+                           - In 'sheet' mode: Defines Wall Thickness (must be > 0).
+                           - In 'strut' mode: Defines Volume Fraction/Isovalue.
         pad_width (int): Number of voxel layers to force to void at the boundaries.
                          This ensures the mesh is watertight (capped). Default is 2.
 
@@ -118,10 +123,17 @@ def generate_adaptive_lattice(
     # Linear interpolation between low and high frequency fields
     result = (field_low * (1 - w)) + (field_high * w)
 
-    # 5. Apply Wall Thickness Threshold
-    # Isosurface: |result| - threshold = 0
-    # Values < 0 are inside the wall (solid), Values > 0 are air (void)
-    scalar_field = np.abs(result) - threshold
+    # 5. Apply Structure Mode Logic
+    if structure_mode == 'sheet':
+        # Sheet/Shell: Wall around the zero isosurface
+        # Values < 0 are inside the wall (solid), Values > 0 are air (void)
+        scalar_field = np.abs(result) - threshold
+    elif structure_mode == 'strut':
+        # Strut/Network: Solidify one domain
+        # Using the requested formula: blended_lattice - threshold
+        scalar_field = result - threshold
+    else:
+        raise ValueError(f"Unknown structure_mode: '{structure_mode}'. Use 'sheet' or 'strut'.")
 
     # 6. Apply Padding to force watertight mesh
     # We force the boundary voxels to a positive value (Void) to close the mesh.
