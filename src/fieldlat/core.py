@@ -2,38 +2,40 @@ import numpy as np
 import pyvista as pv
 from skimage.measure import marching_cubes
 
-def get_lattice_field(lattice_type: str, scale: float, X: np.ndarray, Y: np.ndarray, Z: np.ndarray) -> np.ndarray:
+def get_lattice_field(lattice_type: str, scale: np.ndarray, X: np.ndarray, Y: np.ndarray, Z: np.ndarray) -> np.ndarray:
     """
-    Computes the scalar field values for the specified lattice topology.
+    Computes the scalar field values for the specified lattice topology using Domain Warping.
     
     Args:
         lattice_type (str): 'gyroid', 'diamond', 'primitive', or 'lidinoid'.
-        scale (float): The frequency/scale factor for the coordinates.
+        scale (np.ndarray): The frequency/scale factor map (k_map) for the coordinates.
         X, Y, Z (np.ndarray): Meshgrid coordinates.
         
     Returns:
         np.ndarray: The computed scalar field.
     """
+    # Domain Warping: Multiply coordinates by the spatially varying scale (frequency) map
+    sx, sy, sz = scale * X, scale * Y, scale * Z
+
     if lattice_type == 'lidinoid':
-        # Note: Lidinoid uses 2*x in its formula, effectively doubling the density.
-        # We divide by 2.0 here so that 'base_scale' results in roughly the same cell size
-        # as other lattice types.
-        sx, sy, sz = (scale * X) / 2.0, (scale * Y) / 2.0, (scale * Z) / 2.0
+        # Lidinoid Special Case:
+        # The logic maintains gx = 2 * x * k_map to preserve the 2x density 
+        # relative to the map naturally found in the sin(2x) term.
         
-        term1 = 0.5 * (np.sin(2*sx)*np.cos(sy)*np.sin(sz) + 
-                       np.sin(2*sy)*np.cos(sz)*np.sin(sx) + 
-                       np.sin(2*sz)*np.cos(sx)*np.sin(sy))
+        # Double frequency terms (2 * k * x)
+        gx, gy, gz = 2.0 * sx, 2.0 * sy, 2.0 * sz
         
-        term2 = 0.5 * (np.cos(2*sx)*np.cos(2*sy) + 
-                       np.cos(2*sy)*np.cos(2*sz) + 
-                       np.cos(2*sz)*np.cos(2*sx))
+        term1 = 0.5 * (np.sin(gx)*np.cos(sy)*np.sin(sz) + 
+                       np.sin(gy)*np.cos(sz)*np.sin(sx) + 
+                       np.sin(gz)*np.cos(sx)*np.sin(sy))
+        
+        term2 = 0.5 * (np.cos(gx)*np.cos(gy) + 
+                       np.cos(gy)*np.cos(gz) + 
+                       np.cos(gz)*np.cos(gx))
                        
         return term1 - term2 + 0.15
 
-    # Standard scaling for other types
-    sx, sy, sz = scale * X, scale * Y, scale * Z
-
-    if lattice_type == 'gyroid':
+    elif lattice_type == 'gyroid':
         return np.sin(sx) * np.cos(sy) + np.sin(sy) * np.cos(sz) + np.sin(sz) * np.cos(sx)
 
     elif lattice_type == 'diamond':
@@ -63,7 +65,7 @@ def generate_adaptive_lattice(
     pad_width: int = 2
 ) -> pv.PolyData:
     """
-    Generates an adaptive lattice (TPMS) with variable cell size via lattice blending.
+    Generates an adaptive lattice (TPMS) using Domain Warping (Frequency Modulation).
 
     Args:
         mesh (pv.DataSet): The source mesh containing the scalar field.
@@ -72,8 +74,8 @@ def generate_adaptive_lattice(
         structure_mode (str): 'sheet' (Shell) or 'strut' (Skeletal). 
                               Defaults to 'sheet'.
         resolution (int): Resolution of the voxel grid (cubed).
-        base_scale (float): The frequency for low-stress areas (larger cells).
-        dense_scale (float): The frequency for high-stress areas (smaller cells).
+        base_scale (float): The frequency k for low-stress areas (k_min).
+        dense_scale (float): The frequency k for high-stress areas (k_max).
         threshold (float): Controls density/thickness.
                            - In 'sheet' mode: Defines Wall Thickness (must be > 0).
                            - In 'strut' mode: Defines Volume Fraction/Isovalue.
@@ -116,14 +118,18 @@ def generate_adaptive_lattice(
     else:
         w = np.zeros_like(field_values)
 
-    # 4. Calculate Blended Lattice Field
-    field_low = get_lattice_field(lattice_type, base_scale, X, Y, Z)
-    field_high = get_lattice_field(lattice_type, dense_scale, X, Y, Z)
+    # 4. Calculate Frequency Map (k_map) for Domain Warping
+    # k_min = (2 * np.pi) / max_cell_size  <-- conceptually, provided via base_scale
+    # k_max = (2 * np.pi) / min_cell_size  <-- conceptually, provided via dense_scale
+    k_min = base_scale
+    k_max = dense_scale
+    
+    k_map = k_min + (k_max - k_min) * w
 
-    # Linear interpolation between low and high frequency fields
-    result = (field_low * (1 - w)) + (field_high * w)
+    # 5. Generate Lattice Field using the Frequency Map
+    result = get_lattice_field(lattice_type, k_map, X, Y, Z)
 
-    # 5. Apply Structure Mode Logic
+    # 6. Apply Structure Mode Logic
     if structure_mode == 'sheet':
         # Sheet/Shell: Wall around the zero isosurface
         # Values < 0 are inside the wall (solid), Values > 0 are air (void)
@@ -135,8 +141,7 @@ def generate_adaptive_lattice(
     else:
         raise ValueError(f"Unknown structure_mode: '{structure_mode}'. Use 'sheet' or 'strut'.")
 
-    # 6. Apply Padding to force watertight mesh
-    # We force the boundary voxels to a positive value (Void) to close the mesh.
+    # 7. Apply Padding to force watertight mesh
     if pad_width > 0:
         scalar_field[:pad_width, :, :] = 1.0
         scalar_field[-pad_width:, :, :] = 1.0
@@ -145,7 +150,7 @@ def generate_adaptive_lattice(
         scalar_field[:, :, :pad_width] = 1.0
         scalar_field[:, :, -pad_width:] = 1.0
 
-    # 7. Extract Surface using Marching Cubes
+    # 8. Extract Surface using Marching Cubes
     verts, faces, normals, values = marching_cubes(
         scalar_field, 
         level=0.0, 
@@ -155,7 +160,7 @@ def generate_adaptive_lattice(
     # Offset vertices by the origin
     verts += np.array([bounds[0], bounds[2], bounds[4]])
 
-    # 8. Convert to PyVista Mesh
+    # 9. Convert to PyVista Mesh
     n_faces = faces.shape[0]
     padding = np.full((n_faces, 1), 3)
     pv_faces = np.hstack((padding, faces)).flatten()
