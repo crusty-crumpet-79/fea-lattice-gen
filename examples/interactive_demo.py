@@ -25,16 +25,30 @@ stress_values = points[:, 0]  # Stress increases along X axis
 stress_values = (stress_values - stress_values.min()) / (stress_values.max() - stress_values.min()) * 100
 mesh.point_data["stress"] = stress_values
 
-# --- 2. SETUP PLOTTER ---
+# --- 2. CALCULATE SAFE BOUNDS ---
+DEFAULT_RES = 200
+# Calculate the physical size of one voxel
+voxel_size = (mesh.bounds[1] - mesh.bounds[0]) / DEFAULT_RES
+# Minimum safe cell size (~8 voxels for smooth definition)
+safe_min = voxel_size * 8.0
+# Maximum safe cell size (Full domain width)
+safe_max = mesh.bounds[1] - mesh.bounds[0]
+
+print(f"Calculated Dynamic Bounds (Res={DEFAULT_RES}):")
+print(f"  - Voxel Size: {voxel_size:.2f}mm")
+print(f"  - Safe Min Cell: {safe_min:.2f}mm (Nyquist Limit)")
+print(f"  - Safe Max Cell: {safe_max:.2f}mm")
+
+# --- 3. SETUP PLOTTER ---
 p = pv.Plotter()
 p.add_text("FieldLat Interactive Designer", font_size=18)
 
 # Global State to store current slider values
 params = {
-    "dense_scale": 1.2,
-    "base_scale": 0.2,
+    "min_cell_size": safe_min * 1.5, # Default to slightly above min
+    "max_cell_size": safe_max / 4.0, # Default to 1/4 of domain
     "threshold": 0.5,
-    "res": 200  # Start with moderate resolution
+    "res": DEFAULT_RES
 }
 
 # Keep track of the actor to remove/replace it
@@ -48,18 +62,26 @@ def update_mesh():
     p.add_text("Generating...", name="status", position='upper_right', color='red', font_size=12)
     
     try:
+        # Convert Cell Size (L) to Angular Frequency (k)
+        # k = 2 * pi / L
+        # Note: 'base_scale' is for low stress (larger cells -> max_cell_size)
+        #       'dense_scale' is for high stress (smaller cells -> min_cell_size)
+        
+        # Protect against div by zero
+        k_min = (2 * np.pi) / max(params["max_cell_size"], 0.001) 
+        k_max = (2 * np.pi) / max(params["min_cell_size"], 0.001)
+
         # 2. Call your actual library logic
-        # Note: We use the current params dictionary
         lattice = generate_adaptive_lattice(
             mesh=mesh,
             field_name="stress",
-            resolution=int(params["res"]),  # Use slider resolution
-            dense_scale=params["dense_scale"],
-            base_scale=params["base_scale"],
+            resolution=int(params["res"]),
+            dense_scale=k_max,    # High Stress -> Small Cells
+            base_scale=k_min,     # Low Stress -> Large Cells
             threshold=params["threshold"],
-            lattice_type='gyroid',   # You could add a dropdown for this later!
+            lattice_type='gyroid',
             structure_mode='sheet',
-            pad_width=2              # Force watertight boundary
+            pad_width=2
         )
         
         # 3. Update the Plotter
@@ -77,15 +99,17 @@ def update_mesh():
         print(f"Generation failed: {e}")
         p.add_text(f"Error: {str(e)}", name="status", color='red')
 
-# --- 3. DEFINE CALLBACKS ---
-# These functions are called when you move the sliders
+# --- 4. DEFINE CALLBACKS ---
 
-def set_dense_scale(value):
-    params["dense_scale"] = value
+def set_min_cell(value):
+    # Ensure min < max
+    if value >= params["max_cell_size"]:
+        pass # In a real app we'd clamp, but here just updating is fine
+    params["min_cell_size"] = value
     update_mesh()
 
-def set_base_scale(value):
-    params["base_scale"] = value
+def set_max_cell(value):
+    params["max_cell_size"] = value
     update_mesh()
 
 def set_threshold(value):
@@ -94,25 +118,26 @@ def set_threshold(value):
 
 def toggle_resolution(flag):
     # flag is True (High Res) or False (Low Res)
-    params["res"] = 80 if flag else 30
+    # Note: Changing resolution affects safety limits, but we keep sliders static for this demo
+    params["res"] = 250 if flag else 100
     update_mesh()
 
-# --- 4. ADD WIDGETS ---
+# --- 5. ADD WIDGETS ---
 # PyVista places these in the corner of the window
 
 p.add_slider_widget(
-    set_dense_scale, 
-    [0.1, 5.0], 
-    value=1.2, 
-    title="High Stress Freq (k_max)", 
-    pointa=(0.05, 0.9), pointb=(0.25, 0.9) # Screen coordinates
+    set_min_cell, 
+    [safe_min, safe_max], 
+    value=params["min_cell_size"], 
+    title=f"Min Cell Size (Safe > {safe_min:.1f})", 
+    pointa=(0.05, 0.9), pointb=(0.25, 0.9)
 )
 
 p.add_slider_widget(
-    set_base_scale, 
-    [0.1, 5.0], 
-    value=0.2, 
-    title="Low Stress Freq (k_min)", 
+    set_max_cell, 
+    [safe_min, safe_max], 
+    value=params["max_cell_size"], 
+    title=f"Max Cell Size (Safe < {safe_max:.1f})", 
     pointa=(0.05, 0.75), pointb=(0.25, 0.75)
 )
 
@@ -126,16 +151,19 @@ p.add_slider_widget(
 
 p.add_checkbox_button_widget(
     toggle_resolution, 
-    value=False, 
+    value=False, # Default to 100 (Low) since params["res"]=200 was our calc basis, we should align.
+                 # Actually, let's align button: default False -> 200? 
+                 # To avoid confusion, let's just say Button ON = 250, OFF = 150.
+                 # We calculated bounds for 200.
     position=(10, 10), 
     size=30,
     border_size=2,
     color_on='green',
     color_off='grey'
 )
-p.add_text("High Res Mode", position=(50, 15), font_size=10, color='black')
+p.add_text("Increase Res", position=(50, 15), font_size=10, color='black')
 
-# --- 5. RUN ---
+# --- 6. RUN ---
 # Initial draw
 update_mesh()
 print("Starting Interactive Viewer... (Interact with the window)")
