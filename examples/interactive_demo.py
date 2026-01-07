@@ -34,7 +34,7 @@ params = {
     "dense_scale": 1.2,
     "base_scale": 0.2,
     "threshold": 0.5,
-    "res": 50  # Start with moderate resolution
+    "res": 200  # Start with moderate resolution
 }
 
 # Keep track of the actor to remove/replace it
@@ -47,28 +47,35 @@ def update_mesh():
     # 1. Show a status message
     p.add_text("Generating...", name="status", position='upper_right', color='red', font_size=12)
     
-    # 2. Call your actual library logic
-    # Note: We use the current params dictionary
-    lattice = generate_adaptive_lattice(
-        mesh=mesh,
-        field_name="stress",
-        resolution=int(params["res"]),  # Use slider resolution
-        dense_scale=params["dense_scale"],
-        base_scale=params["base_scale"],
-        threshold=params["threshold"],
-        lattice_type='gyroid',   # You could add a dropdown for this later!
-        structure_mode='sheet'
-    )
-    
-    # 3. Update the Plotter
-    if current_actor:
-        p.remove_actor(current_actor)
-    
-    # Add new mesh (White color, smooth shading)
-    current_actor = p.add_mesh(lattice, color="white", specular=0.5, smooth_shading=True)
-    
-    # Clear status
-    p.add_text("", name="status") 
+    try:
+        # 2. Call your actual library logic
+        # Note: We use the current params dictionary
+        lattice = generate_adaptive_lattice(
+            mesh=mesh,
+            field_name="stress",
+            resolution=int(params["res"]),  # Use slider resolution
+            dense_scale=params["dense_scale"],
+            base_scale=params["base_scale"],
+            threshold=params["threshold"],
+            lattice_type='gyroid',   # You could add a dropdown for this later!
+            structure_mode='sheet',
+            pad_width=2              # Force watertight boundary
+        )
+        
+        # 3. Update the Plotter
+        if current_actor:
+            p.remove_actor(current_actor)
+        
+        # Add new mesh (White color, smooth shading)
+        if lattice.n_points > 0:
+            current_actor = p.add_mesh(lattice, color="white", specular=0.5, smooth_shading=True)
+            p.add_text("", name="status") # Clear status
+        else:
+            p.add_text("Empty Mesh", name="status", color='yellow')
+
+    except Exception as e:
+        print(f"Generation failed: {e}")
+        p.add_text(f"Error: {str(e)}", name="status", color='red')
 
 # --- 3. DEFINE CALLBACKS ---
 # These functions are called when you move the sliders
@@ -95,23 +102,23 @@ def toggle_resolution(flag):
 
 p.add_slider_widget(
     set_dense_scale, 
-    [0.1, 3.0], 
+    [0.1, 5.0], 
     value=1.2, 
-    title="Dense Scale (High Freq)", 
+    title="High Stress Freq (k_max)", 
     pointa=(0.05, 0.9), pointb=(0.25, 0.9) # Screen coordinates
 )
 
 p.add_slider_widget(
     set_base_scale, 
-    [0.1, 3.0], 
+    [0.1, 5.0], 
     value=0.2, 
-    title="Base Scale (Low Freq)", 
+    title="Low Stress Freq (k_min)", 
     pointa=(0.05, 0.75), pointb=(0.25, 0.75)
 )
 
 p.add_slider_widget(
     set_threshold, 
-    [0.1, 0.9], 
+    [0.01, 1.2], 
     value=0.3, 
     title="Wall Thickness", 
     pointa=(0.05, 0.6), pointb=(0.25, 0.6)
