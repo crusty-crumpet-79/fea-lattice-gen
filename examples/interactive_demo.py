@@ -50,10 +50,13 @@ params = {
     "threshold": 0.5,
     "res": DEFAULT_RES,
     "gradient_strategy": 'blend',
+    "structure_mode": 'sheet',
     "lattice_type": 'gyroid'
 }
 
 topologies = ['gyroid', 'diamond', 'primitive', 'lidinoid']
+structure_modes = ['sheet', 'strut']
+gradient_strategies = ['blend', 'warp']
 
 # Keep track of the actor to remove/replace it
 current_actor = None
@@ -64,7 +67,10 @@ def update_mesh():
     
     # 1. Show a status message
     p.add_text("Generating...", name="status", position='upper_right', color='red', font_size=12)
-    p.add_text(f"Topology: {params['lattice_type'].capitalize()}", name="topo_label", position=(10, 100), font_size=12, color='black')
+    status_text = (f"Topology: {params['lattice_type'].capitalize()}\n"
+                   f"Mode: {params['structure_mode'].capitalize()}\n"
+                   f"Gradient: {params['gradient_strategy'].capitalize()}")
+    p.add_text(status_text, name="topo_label", position=(10, 100), font_size=12, color='black')
     
     try:
         # Convert Cell Size (L) to Angular Frequency (k)
@@ -85,7 +91,7 @@ def update_mesh():
             base_scale=k_min,     # Low Stress -> Large Cells
             threshold=params["threshold"],
             lattice_type=params["lattice_type"],
-            structure_mode='sheet',
+            structure_mode=params["structure_mode"],
             pad_width=2,
             gradient_strategy=params["gradient_strategy"]
         )
@@ -112,6 +118,18 @@ def set_topology(value):
     # Clamp just in case
     idx = max(0, min(len(topologies) - 1, idx))
     params["lattice_type"] = topologies[idx]
+    update_mesh()
+
+def set_structure_mode(value):
+    idx = int(round(value))
+    idx = max(0, min(len(structure_modes) - 1, idx))
+    params["structure_mode"] = structure_modes[idx]
+    update_mesh()
+
+def set_gradient_strategy(value):
+    idx = int(round(value))
+    idx = max(0, min(len(gradient_strategies) - 1, idx))
+    params["gradient_strategy"] = gradient_strategies[idx]
     update_mesh()
 
 def set_min_cell(value):
@@ -168,6 +186,24 @@ p.add_slider_widget(
     value=0,
     title="Topology Selector",
     pointa=(0.05, 0.45), pointb=(0.25, 0.45),
+    fmt="%0.0f"
+)
+
+p.add_slider_widget(
+    set_structure_mode,
+    [0, len(structure_modes)-1],
+    value=0,
+    title="Mode: Sheet (0) | Strut (1)",
+    pointa=(0.05, 0.3), pointb=(0.25, 0.3),
+    fmt="%0.0f"
+)
+
+p.add_slider_widget(
+    set_gradient_strategy,
+    [0, len(gradient_strategies)-1],
+    value=0,
+    title="Grad: Blend (0) | Warp (1)",
+    pointa=(0.05, 0.15), pointb=(0.25, 0.15),
     fmt="%0.0f"
 )
 
